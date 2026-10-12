@@ -22,6 +22,7 @@ public static class DependencyInjection
         services.Configure<OutboxConfiguracao>(configuration.GetSection(OutboxConfiguracao.Secao));
         services.Configure<SmtpConfiguracao>(configuration.GetSection(SmtpConfiguracao.Secao));
         services.Configure<LinksSistemaConfiguracao>(configuration.GetSection(LinksSistemaConfiguracao.Secao));
+        services.Configure<EmailTemplatesConfiguracao>(configuration.GetSection(EmailTemplatesConfiguracao.Secao));
 
         services.AddScoped<AuditoriaSaveChangesInterceptor>();
         services.AddDbContext<AuthDbContext>((serviceProvider, options) =>
@@ -44,6 +45,7 @@ public static class DependencyInjection
         services.AddSingleton<IPropriedadesSensiveisProvider, PropriedadesSensiveisProvider>();
         services.AddScoped<IHashSenhaUsuario, HashSenhaUsuario>();
         services.AddScoped<ITokenServico, TokenServico>();
+        services.AddSingleton<IRenderizadorTemplateEmail, RenderizadorTemplateEmail>();
         services.AddScoped<IServicoNotificacao, ServicoNotificacaoEmail>();
         var outboxConfiguracao = configuration.GetSection(OutboxConfiguracao.Secao).Get<OutboxConfiguracao>() ?? new OutboxConfiguracao();
         if (outboxConfiguracao.Habilitado)

@@ -53,3 +53,9 @@ public sealed class LinksSistemaConfiguracao
     public const string Secao = "LinksSistema";
     public string UrlBaseApi { get; init; } = "https://localhost:7295";
 }
+
+public sealed class EmailTemplatesConfiguracao
+{
+    public const string Secao = "EmailTemplates";
+    public string Diretorio { get; init; } = "EmailTemplates";
+}

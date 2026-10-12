@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Novo acesso detectado</title>
+</head>
+<body style="background:#eef2f7;color:#172033;font-family:Arial,Helvetica,sans-serif;margin:0;padding:0;">
+    <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">Detectamos uma tentativa de acesso em um novo dispositivo.</div>
+    <div style="margin:0 auto;max-width:680px;padding:32px 16px;">
+        <div style="background:#ffffff;border:1px solid #dce3ed;border-radius:8px;overflow:hidden;">
+            <div style="background:#0f172a;color:#ffffff;padding:24px 28px;">
+                <p style="color:#93c5fd;font-size:12px;font-weight:700;letter-spacing:.08em;margin:0 0 8px;text-transform:uppercase;">Alerta de segurança</p>
+                <h1 style="font-size:24px;line-height:1.25;margin:0;">Novo acesso em análise</h1>
+            </div>
+
+            <div style="padding:28px;">
+                <p style="font-size:16px;line-height:1.55;margin:0 0 18px;">Olá, {{NomeUsuario}}.</p>
+                <p style="font-size:16px;line-height:1.55;margin:0 0 22px;">Identificamos uma tentativa de acesso à sua conta em um dispositivo que ainda não foi reconhecido. Revise os detalhes abaixo e escolha uma ação.</p>
+
+                <table role="presentation" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin:0 0 22px;width:100%;">
+                    <tr>
+                        <td style="padding:18px 20px;">
+                            <p style="color:#64748b;font-size:12px;font-weight:700;letter-spacing:.06em;margin:0 0 12px;text-transform:uppercase;">Detalhes do acesso</p>
+                            <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;">
+                                <tr>
+                                    <td style="color:#64748b;font-size:13px;padding:7px 16px 7px 0;width:150px;">Dispositivo</td>
+                                    <td style="color:#172033;font-size:14px;font-weight:700;padding:7px 0;">{{Dispositivo}}</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-size:13px;padding:7px 16px 7px 0;">Navegador</td>
+                                    <td style="color:#172033;font-size:14px;font-weight:700;padding:7px 0;">{{Navegador}}</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-size:13px;padding:7px 16px 7px 0;">Sistema</td>
+                                    <td style="color:#172033;font-size:14px;font-weight:700;padding:7px 0;">{{SistemaOperacional}}</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-size:13px;padding:7px 16px 7px 0;">IP</td>
+                                    <td style="color:#172033;font-size:14px;font-weight:700;padding:7px 0;">{{EnderecoIpMascarado}}</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-size:13px;padding:7px 16px 7px 0;">Data e hora</td>
+                                    <td style="color:#172033;font-size:14px;font-weight:700;padding:7px 0;">{{DataHora}}</td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+
+                <table role="presentation" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;margin:0 0 24px;width:100%;">
+                    <tr>
+                        <td style="padding:18px 20px;">
+                            <p style="color:#64748b;font-size:12px;font-weight:700;letter-spacing:.06em;margin:0 0 12px;text-transform:uppercase;">Localização aproximada</p>
+                            <p style="color:#172033;font-size:16px;font-weight:700;margin:0 0 6px;">{{Localizacao}}</p>
+                            <p style="color:#64748b;font-size:13px;line-height:1.5;margin:0;">Coordenadas: {{Coordenadas}}</p>
+
+                            {{#TemMapa}}
+                            <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:12px;">
+                                <tr>
+                                    <td style="padding:0 8px 8px 0;">
+                                        <a href="{{GoogleMapsUrl}}" style="background:#0f172a;border-radius:6px;color:#ffffff;display:inline-block;font-size:13px;font-weight:700;padding:10px 14px;text-decoration:none;">Abrir no Google Maps</a>
+                                    </td>
+                                    <td style="padding:0 0 8px 0;">
+                                        <a href="{{OpenStreetMapUrl}}" style="background:#334155;border-radius:6px;color:#ffffff;display:inline-block;font-size:13px;font-weight:700;padding:10px 14px;text-decoration:none;">Abrir no OpenStreetMap</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            {{/TemMapa}}
+
+                            {{^TemMapa}}
+                            <p style="color:#64748b;font-size:13px;line-height:1.5;margin:8px 0 0;">O mapa não está disponível porque o login não enviou latitude e longitude.</p>
+                            {{/TemMapa}}
+                        </td>
+                    </tr>
+                </table>
+
+                <table role="presentation" cellpadding="0" cellspacing="0" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;margin:0 0 24px;width:100%;">
+                    <tr>
+                        <td style="padding:18px 20px;">
+                            <p style="color:#9a3412;font-size:15px;font-weight:700;margin:0 0 6px;">Foi você?</p>
+                            <p style="color:#7c2d12;font-size:14px;line-height:1.5;margin:0;">Confirme o acesso se reconhecer este dispositivo. Caso contrário, rejeite imediatamente para bloquear a sessão.</p>
+                        </td>
+                    </tr>
+                </table>
+
+                <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">
+                    <tr>
+                        <td style="padding:0 10px 12px 0;">
+                            <a href="{{ConfirmarUrl}}" style="background:#15803d;border-radius:6px;color:#ffffff;display:inline-block;font-size:15px;font-weight:700;padding:13px 18px;text-decoration:none;">Sim, fui eu</a>
+                        </td>
+                        <td style="padding:0 0 12px 0;">
+                            <a href="{{RejeitarUrl}}" style="background:#b91c1c;border-radius:6px;color:#ffffff;display:inline-block;font-size:15px;font-weight:700;padding:13px 18px;text-decoration:none;">Não fui eu</a>
+                        </td>
+                    </tr>
+                </table>
+
+                <p style="border-top:1px solid #e2e8f0;color:#64748b;font-size:13px;line-height:1.5;margin:8px 0 0;padding-top:18px;">Se você não iniciou esse acesso, recomendamos alterar sua senha após rejeitar a sessão.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
