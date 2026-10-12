@@ -1,0 +1,168 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurperClassic
+
+def usuarioDisparo() {
+    def causas = currentBuild.getBuildCauses()
+    def causaUsuario = causas.find { it._class == 'hudson.model.Cause$UserIdCause' }
+    return causaUsuario?.userName ?: causaUsuario?.userId ?: 'Automatico'
+}
+
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '50', artifactNumToKeepStr: '50'))
+    }
+
+    parameters {
+        string(
+            name: 'NUMERO_BUILD',
+            defaultValue: '',
+            description: 'Numero da build gerada pelo pipeline de build'
+        )
+        choice(
+            name: 'AMBIENTE',
+            choices: ['DEV', 'HOMOLOGACAO', 'PRODUCAO'],
+            description: 'Ambiente de publicacao'
+        )
+    }
+
+    environment {
+        BUILD_JOB_NAME = 'AuthService-Build'
+        DOWNLOAD_DIR = 'artifact-download'
+        DEPLOY_ROOT = '/var/jenkins_home/deployments/AuthService'
+    }
+
+    stages {
+        stage('Validar parametros') {
+            steps {
+                script {
+                    if (!params.NUMERO_BUILD?.trim()) {
+                        error 'Informe o NUMERO_BUILD para deploy.'
+                    }
+                    if (!(params.NUMERO_BUILD ==~ /^[0-9]+$/)) {
+                        error 'NUMERO_BUILD deve conter apenas numeros.'
+                    }
+                    env.DEPLOY_USER_NAME = usuarioDisparo()
+                }
+            }
+        }
+
+        stage('Baixar artefato da build') {
+            steps {
+                deleteDir()
+                copyArtifacts(
+                    projectName: env.BUILD_JOB_NAME,
+                    selector: specific(params.NUMERO_BUILD),
+                    filter: 'artifacts/AuthService-*.zip',
+                    target: env.DOWNLOAD_DIR,
+                    fingerprintArtifacts: true
+                )
+                script {
+                    env.ARTEFATO_ZIP_PATH = sh(returnStdout: true, script: '''
+set -e
+files="$(find "$DOWNLOAD_DIR" -type f -name 'AuthService-*.zip' | sort)"
+count="$(printf "%s\\n" "$files" | sed '/^$/d' | wc -l | tr -d ' ')"
+if [ "$count" != "1" ]; then
+  echo "Esperado exatamente 1 ZIP, encontrado $count." >&2
+  exit 1
+fi
+printf "%s" "$files"
+''').trim()
+                    env.ARTEFATO_ZIP_NOME = env.ARTEFATO_ZIP_PATH.tokenize('\\/')[-1]
+                    echo "Artefato selecionado: ${env.ARTEFATO_ZIP_NOME}"
+                }
+            }
+        }
+
+        stage('Ler metadados do artefato') {
+            steps {
+                script {
+                    def buildInfoJson = sh(returnStdout: true, script: '''
+set -e
+command -v unzip >/dev/null 2>&1 || {
+  echo "Comando unzip nao encontrado no container do Jenkins." >&2
+  echo "Instale unzip na imagem do Jenkins ou no agent." >&2
+  exit 1
+}
+
+unzip -p "$ARTEFATO_ZIP_PATH" build-info.json
+''').trim()
+
+                    def buildInfo = new JsonSlurperClassic().parseText(buildInfoJson)
+                    env.VERSAO_PUBLICADA = "${buildInfo.versao}"
+                    env.COMMIT_PUBLICADO = "${buildInfo.commit}"
+                    env.BRANCH_PUBLICADA = "${buildInfo.branch}"
+                    env.TIPO_BUILD_PUBLICADA = "${buildInfo.tipoBuild}"
+
+                    currentBuild.displayName = "#${env.BUILD_NUMBER} - ${params.AMBIENTE} ${env.VERSAO_PUBLICADA}"
+                    currentBuild.description = "Build ${params.NUMERO_BUILD} | Commit ${env.COMMIT_PUBLICADO.take(12)}"
+
+                    echo "Versao: ${env.VERSAO_PUBLICADA}"
+                    echo "Build origem: ${params.NUMERO_BUILD}"
+                    echo "Ambiente: ${params.AMBIENTE}"
+                    echo "Commit: ${env.COMMIT_PUBLICADO}"
+                }
+            }
+        }
+
+        stage('Confirmacao de producao') {
+            when {
+                expression { return params.AMBIENTE == 'PRODUCAO' }
+            }
+            steps {
+                input message: "Deseja realmente publicar a versao ${env.VERSAO_PUBLICADA} em PRODUCAO?", ok: 'Publicar'
+            }
+        }
+
+        stage('Publicar artefato') {
+            steps {
+                sh '''
+set -e
+destino="$DEPLOY_ROOT/$AMBIENTE/$VERSAO_PUBLICADA"
+mkdir -p "$destino"
+
+destino_zip="$destino/$ARTEFATO_ZIP_NOME"
+cp "$ARTEFATO_ZIP_PATH" "$destino_zip"
+
+printf "%s" "$destino_zip" > "$WORKSPACE/deploy-path.txt"
+'''
+            }
+        }
+
+        stage('Registrar deploy') {
+            steps {
+                script {
+                    def caminhoPublicacao = readFile('deploy-path.txt').trim()
+                    def deployInfo = [
+                        versao: env.VERSAO_PUBLICADA,
+                        numeroBuild: params.NUMERO_BUILD,
+                        ambiente: params.AMBIENTE,
+                        dataHora: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC')),
+                        usuario: env.DEPLOY_USER_NAME,
+                        commit: env.COMMIT_PUBLICADO,
+                        branch: env.BRANCH_PUBLICADA,
+                        tipoBuild: env.TIPO_BUILD_PUBLICADA,
+                        status: 'SUCESSO',
+                        nomeArtefato: env.ARTEFATO_ZIP_NOME,
+                        caminhoPublicacao: caminhoPublicacao
+                    ]
+
+                    writeFile file: 'deploy-info.json', text: JsonOutput.prettyPrint(JsonOutput.toJson(deployInfo)) + System.lineSeparator()
+                    currentBuild.description = "Build ${params.NUMERO_BUILD} | ${params.AMBIENTE} | ${env.VERSAO_PUBLICADA} | Commit ${env.COMMIT_PUBLICADO.take(12)}"
+                }
+                archiveArtifacts artifacts: 'deploy-info.json', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        failure {
+            script {
+                currentBuild.description = "FALHA | Build ${params.NUMERO_BUILD} | ${params.AMBIENTE}"
+            }
+        }
+    }
+}

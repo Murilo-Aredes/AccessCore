@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+.appdata/
+.dotnet/
+work/
+artifacts/
+TestResults/
+
+.env
+*.user
+*.suo

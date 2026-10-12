@@ -1,0 +1,14 @@
+.git
+.vs
+.appdata
+.dotnet
+bin
+obj
+**/bin
+**/obj
+work
+artifacts
+.env
+*.user
+*.suo
+TestResults

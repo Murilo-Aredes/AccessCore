@@ -1,0 +1,288 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurperClassic
+
+def usuarioDisparo() {
+    def causas = currentBuild.getBuildCauses()
+    def causaUsuario = causas.find { it._class == 'hudson.model.Cause$UserIdCause' }
+    return causaUsuario?.userName ?: causaUsuario?.userId ?: 'Automatico'
+}
+
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '50', artifactNumToKeepStr: '50'))
+    }
+
+    parameters {
+        choice(
+            name: 'TIPO_VERSAO',
+            choices: ['PATCH', 'MINOR', 'MAJOR'],
+            description: 'Selecione o tipo de incremento da versao'
+        )
+        choice(
+            name: 'TIPO_BUILD',
+            choices: ['SNAPSHOT', 'RELEASE'],
+            description: 'Selecione o tipo da build'
+        )
+        booleanParam(
+            name: 'EXECUTAR_TESTES',
+            defaultValue: true,
+            description: 'Executar testes antes de gerar a build?'
+        )
+    }
+
+    environment {
+        SOLUTION_FILE = 'AuthService.slnx'
+        API_PROJECT = 'AuthService.Api/AuthService.Api.csproj'
+        CONFIGURATION = 'Release'
+        ARTIFACTS_DIR = 'artifacts'
+        PUBLISH_DIR = 'artifacts/publish'
+        GIT_CREDENTIALS_ID = 'git-credentials'
+        GIT_USER_NAME = 'Jenkins CI'
+        GIT_USER_EMAIL = 'jenkins@local'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'git fetch --tags --prune'
+                script {
+                    env.BUILD_USER_NAME = usuarioDisparo()
+                    env.GIT_COMMIT_FULL = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                    env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short=12 HEAD').trim()
+
+                    def branch = env.BRANCH_NAME ?: env.GIT_BRANCH
+                    if (!branch?.trim()) {
+                        branch = sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
+                    }
+                    env.GIT_BRANCH_NAME = branch.replaceFirst(/^origin\//, '')
+                }
+            }
+        }
+
+        stage('Ler versao atual') {
+            steps {
+                script {
+                    if (!fileExists('version.json')) {
+                        error 'Arquivo version.json nao encontrado no repositorio.'
+                    }
+
+                    def versaoAtual = new JsonSlurperClassic().parseText(readFile('version.json'))
+                    env.VERSION_MAJOR_ATUAL = "${versaoAtual.major as int}"
+                    env.VERSION_MINOR_ATUAL = "${versaoAtual.minor as int}"
+                    env.VERSION_PATCH_ATUAL = "${versaoAtual.patch as int}"
+
+                    echo "Versao atual: ${env.VERSION_MAJOR_ATUAL}.${env.VERSION_MINOR_ATUAL}.${env.VERSION_PATCH_ATUAL}"
+                }
+            }
+        }
+
+        stage('Calcular nova versao') {
+            steps {
+                script {
+                    int major = env.VERSION_MAJOR_ATUAL as int
+                    int minor = env.VERSION_MINOR_ATUAL as int
+                    int patch = env.VERSION_PATCH_ATUAL as int
+
+                    if (params.TIPO_VERSAO == 'PATCH') {
+                        patch += 1
+                    } else if (params.TIPO_VERSAO == 'MINOR') {
+                        minor += 1
+                        patch = 0
+                    } else if (params.TIPO_VERSAO == 'MAJOR') {
+                        major += 1
+                        minor = 0
+                        patch = 0
+                    } else {
+                        error "Tipo de versao invalido: ${params.TIPO_VERSAO}"
+                    }
+
+                    env.VERSION_MAJOR_NOVA = "${major}"
+                    env.VERSION_MINOR_NOVA = "${minor}"
+                    env.VERSION_PATCH_NOVA = "${patch}"
+                    env.VERSION_BASE = "${major}.${minor}.${patch}"
+                    env.VERSAO_GERADA = params.TIPO_BUILD == 'SNAPSHOT'
+                        ? "${env.VERSION_BASE}-SNAPSHOT-build.${env.BUILD_NUMBER}"
+                        : env.VERSION_BASE
+                    env.ARTEFATO_NOME = "AuthService-${env.VERSAO_GERADA}.zip"
+                    env.ZIP_PATH = "${env.ARTIFACTS_DIR}/${env.ARTEFATO_NOME}"
+
+                    if (params.TIPO_BUILD == 'RELEASE') {
+                        def tagExiste = sh(returnStatus: true, script: "git rev-parse -q --verify refs/tags/v${env.VERSION_BASE} >/dev/null")
+                        if (tagExiste == 0) {
+                            error "A release v${env.VERSION_BASE} ja existe. Releases sao imutaveis."
+                        }
+                    }
+
+                    currentBuild.displayName = params.TIPO_BUILD == 'RELEASE'
+                        ? "#${env.BUILD_NUMBER} - RELEASE ${env.VERSION_BASE}"
+                        : "#${env.BUILD_NUMBER} - ${env.VERSAO_GERADA}"
+                    currentBuild.description = "${params.TIPO_VERSAO} | ${params.TIPO_BUILD} | Commit ${env.GIT_COMMIT_SHORT}"
+
+                    echo "Nova versao calculada: ${env.VERSAO_GERADA}"
+                }
+            }
+        }
+
+        stage('Restore') {
+            steps {
+                sh 'dotnet restore "$SOLUTION_FILE"'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'dotnet build "$SOLUTION_FILE" --configuration "$CONFIGURATION" --no-restore -p:Version="$VERSAO_GERADA"'
+            }
+        }
+
+        stage('Testes') {
+            when {
+                expression { return params.EXECUTAR_TESTES }
+            }
+            steps {
+                sh 'dotnet test "$SOLUTION_FILE" --configuration "$CONFIGURATION" --no-build --verbosity normal'
+            }
+        }
+
+        stage('Publish') {
+            steps {
+                sh '''
+set -e
+rm -rf "$ARTIFACTS_DIR"
+mkdir -p "$PUBLISH_DIR"
+dotnet publish "$API_PROJECT" --configuration "$CONFIGURATION" --no-build --output "$PUBLISH_DIR" -p:Version="$VERSAO_GERADA"
+'''
+                script {
+                    def dataGeracao = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+                    def buildInfo = [
+                        numeroBuild: env.BUILD_NUMBER,
+                        versao: env.VERSAO_GERADA,
+                        tipoVersao: params.TIPO_VERSAO,
+                        tipoBuild: params.TIPO_BUILD,
+                        branch: env.GIT_BRANCH_NAME,
+                        commit: env.GIT_COMMIT_FULL,
+                        commitCurto: env.GIT_COMMIT_SHORT,
+                        dataGeracao: dataGeracao,
+                        usuario: env.BUILD_USER_NAME,
+                        status: 'SUCESSO',
+                        nomeArtefato: env.ARTEFATO_NOME
+                    ]
+                    def buildInfoJson = JsonOutput.prettyPrint(JsonOutput.toJson(buildInfo))
+                    writeFile file: "${env.PUBLISH_DIR}/build-info.json", text: buildInfoJson
+                    writeFile file: "${env.ARTIFACTS_DIR}/build-info.json", text: buildInfoJson
+                }
+            }
+        }
+
+        stage('Compactar artefato') {
+            steps {
+                sh '''
+set -e
+command -v zip >/dev/null 2>&1 || {
+  echo "Comando zip nao encontrado no container do Jenkins."
+  echo "Instale zip na imagem do Jenkins ou no agent."
+  exit 1
+}
+
+zip_path="$WORKSPACE/$ZIP_PATH"
+if [ -e "$zip_path" ]; then
+  echo "Artefato ja existe: $zip_path"
+  exit 1
+fi
+
+(cd "$PUBLISH_DIR" && zip -r "$zip_path" .)
+'''
+            }
+        }
+
+        stage('Finalizar release') {
+            when {
+                expression { return params.TIPO_BUILD == 'RELEASE' }
+            }
+            steps {
+                script {
+                    def novaVersao = [
+                        major: env.VERSION_MAJOR_NOVA as int,
+                        minor: env.VERSION_MINOR_NOVA as int,
+                        patch: env.VERSION_PATCH_NOVA as int
+                    ]
+                    writeFile file: 'version.json', text: JsonOutput.prettyPrint(JsonOutput.toJson(novaVersao)) + System.lineSeparator()
+                }
+
+                sh '''
+set -e
+git config user.name "$GIT_USER_NAME"
+git config user.email "$GIT_USER_EMAIL"
+git add version.json
+
+if git diff --cached --quiet; then
+  echo "version.json nao foi alterado."
+  exit 1
+fi
+
+git commit -m "chore: release $VERSION_BASE"
+git tag -a "v$VERSION_BASE" "$GIT_COMMIT_FULL" -m "Release $VERSION_BASE"
+'''
+
+                withCredentials([usernamePassword(credentialsId: env.GIT_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
+                    sh '''
+set -e
+
+cat > "$WORKSPACE/.git-askpass.sh" <<'EOF'
+#!/bin/sh
+case "$1" in
+  *Username*) echo "$GIT_USERNAME" ;;
+  *Password*) echo "$GIT_PASSWORD" ;;
+  *) echo "" ;;
+esac
+EOF
+chmod +x "$WORKSPACE/.git-askpass.sh"
+
+export GIT_ASKPASS="$WORKSPACE/.git-askpass.sh"
+export GIT_TERMINAL_PROMPT=0
+
+git push origin "HEAD:$GIT_BRANCH_NAME"
+git push origin "v$VERSION_BASE"
+
+rm -f "$WORKSPACE/.git-askpass.sh"
+'''
+                }
+            }
+        }
+
+        stage('Arquivar artefato') {
+            steps {
+                archiveArtifacts artifacts: 'artifacts/*.zip, artifacts/build-info.json', fingerprint: true
+            }
+        }
+
+        stage('Exibir informacoes da build') {
+            steps {
+                script {
+                    currentBuild.description = "${params.TIPO_VERSAO} | ${params.TIPO_BUILD} | Commit ${env.GIT_COMMIT_SHORT} | ${env.ARTEFATO_NOME}"
+                    echo "Numero da build: ${env.BUILD_NUMBER}"
+                    echo "Versao: ${env.VERSAO_GERADA}"
+                    echo "Tipo de versao: ${params.TIPO_VERSAO}"
+                    echo "Tipo de build: ${params.TIPO_BUILD}"
+                    echo "Branch: ${env.GIT_BRANCH_NAME}"
+                    echo "Commit: ${env.GIT_COMMIT_FULL}"
+                    echo "Usuario: ${env.BUILD_USER_NAME}"
+                    echo "Artefato: ${env.ARTEFATO_NOME}"
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            script {
+                currentBuild.description = "FALHA | ${params.TIPO_VERSAO} | ${params.TIPO_BUILD} | ${env.GIT_COMMIT_SHORT ?: 'sem commit'}"
+            }
+        }
+    }
+}
